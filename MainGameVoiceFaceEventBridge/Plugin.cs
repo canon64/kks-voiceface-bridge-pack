@@ -694,6 +694,28 @@ namespace MainGameVoiceFaceEventBridge
 
         private const string PoseSonyuClassifiedFileName = "pose_sonyu_classified.json";
         private const string PoseHoushiClassifiedFileName = "pose_houshi_classified.json";
+        private static readonly string[] SonyuCategoryNames =
+        {
+            "正常位系",
+            "騎乗位系",
+            "背面騎乗位系",
+            "後背位系",
+            "座位系",
+            "測位系",
+            "立位系",
+            "立後背位系"
+        };
+        private static readonly string[] HoushiCategoryNames =
+        {
+            "フェラ系",
+            "手コキ系",
+            "パイズリ系",
+            "クンニ系",
+            "69系",
+            "足コキ系",
+            "顔面騎乗系",
+            "キス・愛撫系"
+        };
         private const string PoseControlSectionName = "体位制御";
         private const string PoseControlCategoriesSectionName = "体位制御.カテゴリ";
         private const string PoseControlRulesSectionName = "体位制御.ルール";
@@ -2866,6 +2888,319 @@ namespace MainGameVoiceFaceEventBridge
             }
         }
 
+        private void EnsurePoseClassificationFilesFromProc(HSceneProc proc)
+        {
+            if (proc == null || string.IsNullOrWhiteSpace(PluginDir))
+            {
+                return;
+            }
+
+            bool created = false;
+            created |= EnsureSinglePoseClassificationFile(proc, PoseSonyuClassifiedFileName, isSonyu: true);
+            created |= EnsureSinglePoseClassificationFile(proc, PoseHoushiClassifiedFileName, isSonyu: false);
+
+            if (created)
+            {
+                LoadPoseCategoryEntries();
+            }
+        }
+
+        private bool EnsureSinglePoseClassificationFile(HSceneProc proc, string fileName, bool isSonyu)
+        {
+            if (proc == null || string.IsNullOrWhiteSpace(fileName) || string.IsNullOrWhiteSpace(PluginDir))
+            {
+                return false;
+            }
+
+            string path = Path.Combine(PluginDir, fileName);
+            if (File.Exists(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                var lists = LstUseAnimInfoField?.GetValue(proc) as List<HSceneProc.AnimationListInfo>[];
+                if (lists == null)
+                {
+                    LogWarn("[pose-classify] auto-create skipped (lstUseAnimInfo is null): " + fileName);
+                    return false;
+                }
+
+                Dictionary<string, List<PoseClassificationItem>> categories = isSonyu
+                    ? BuildAutoSonyuPoseCategories(lists)
+                    : BuildAutoHoushiPoseCategories(lists);
+
+                SavePoseClassification(path, categories);
+                int entryCount = categories.Sum(x => x.Value != null ? x.Value.Count : 0);
+                Log($"[pose-classify] auto-created: {path} categories={categories.Count} entries={entryCount}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogWarn("[pose-classify] auto-create failed file=" + fileName + " message=" + ex.Message);
+                return false;
+            }
+        }
+
+        private static Dictionary<string, List<PoseClassificationItem>> BuildAutoSonyuPoseCategories(List<HSceneProc.AnimationListInfo>[] lists)
+        {
+            var categories = CreateCategoryMap(SonyuCategoryNames);
+            if (lists == null)
+            {
+                return categories;
+            }
+
+            for (int mode = 0; mode < lists.Length; mode++)
+            {
+                if (!IsSonyuMode(mode))
+                {
+                    continue;
+                }
+
+                var list = lists[mode];
+                if (list == null)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var info = list[i];
+                    if (info == null || string.IsNullOrWhiteSpace(info.nameAnimation))
+                    {
+                        continue;
+                    }
+
+                    string category = ClassifySonyuPoseCategory(info.nameAnimation);
+                    AddPoseClassificationItem(categories, category, info.nameAnimation, mode);
+                }
+            }
+
+            return categories;
+        }
+
+        private static Dictionary<string, List<PoseClassificationItem>> BuildAutoHoushiPoseCategories(List<HSceneProc.AnimationListInfo>[] lists)
+        {
+            var categories = CreateCategoryMap(HoushiCategoryNames);
+            if (lists == null)
+            {
+                return categories;
+            }
+
+            for (int mode = 0; mode < lists.Length; mode++)
+            {
+                if (!IsHoushiMode(mode))
+                {
+                    continue;
+                }
+
+                var list = lists[mode];
+                if (list == null)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var info = list[i];
+                    if (info == null || string.IsNullOrWhiteSpace(info.nameAnimation))
+                    {
+                        continue;
+                    }
+
+                    string category = ClassifyHoushiPoseCategory(info.nameAnimation);
+                    AddPoseClassificationItem(categories, category, info.nameAnimation, mode);
+                }
+            }
+
+            return categories;
+        }
+
+        private static Dictionary<string, List<PoseClassificationItem>> CreateCategoryMap(string[] categoryNames)
+        {
+            var map = new Dictionary<string, List<PoseClassificationItem>>(StringComparer.Ordinal);
+            if (categoryNames == null)
+            {
+                return map;
+            }
+
+            for (int i = 0; i < categoryNames.Length; i++)
+            {
+                string category = categoryNames[i];
+                if (string.IsNullOrWhiteSpace(category))
+                {
+                    continue;
+                }
+
+                if (!map.ContainsKey(category))
+                {
+                    map[category] = new List<PoseClassificationItem>();
+                }
+            }
+
+            return map;
+        }
+
+        private static bool IsSonyuMode(int mode)
+        {
+            return mode == 2 || mode == 7 || mode == 9;
+        }
+
+        private static bool IsHoushiMode(int mode)
+        {
+            return mode == 1 || mode == 6 || mode == 8;
+        }
+
+        private static string ClassifySonyuPoseCategory(string poseName)
+        {
+            string name = poseName ?? string.Empty;
+
+            if (ContainsAnyCategoryKeyword(name, "逆騎乗", "背面騎乗", "後ろ向き", "Reverse Cowgirl"))
+            {
+                return "背面騎乗位系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "騎乗", "Cowgirl", "またが", "跨"))
+            {
+                return "騎乗位系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "側位", "横", "Side", "Princess Hug"))
+            {
+                return "測位系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "座位", "椅子", "床", "正座", "膝立て", "Sitting"))
+            {
+                return "座位系";
+            }
+
+            bool standing = ContainsAnyCategoryKeyword(name, "立ち", "立位", "Standing", "駅弁", "Wall");
+            bool back = ContainsAnyCategoryKeyword(name, "バック", "後背", "後ろ", "doggy", "Doggystyle", "from behind", "フェンス");
+            if (standing && back)
+            {
+                return "立後背位系";
+            }
+            if (back)
+            {
+                return "後背位系";
+            }
+            if (standing)
+            {
+                return "立位系";
+            }
+
+            return "正常位系";
+        }
+
+        private static string ClassifyHoushiPoseCategory(string poseName)
+        {
+            string name = poseName ?? string.Empty;
+
+            if (ContainsAnyCategoryKeyword(name, "69", "シックスナイン", "sixty"))
+            {
+                return "69系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "フェラ", "口", "oral", "blow", "咥", "しゃぶ"))
+            {
+                return "フェラ系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "パイズリ", "boob", "titty", "乳"))
+            {
+                return "パイズリ系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "クンニ", "cunni", "舐"))
+            {
+                return "クンニ系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "顔面騎乗", "face sit"))
+            {
+                return "顔面騎乗系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "足コキ", "leg", "foot"))
+            {
+                return "足コキ系";
+            }
+            if (ContainsAnyCategoryKeyword(name, "手コキ", "hand", "手"))
+            {
+                return "手コキ系";
+            }
+
+            return "キス・愛撫系";
+        }
+
+        private static bool ContainsAnyCategoryKeyword(string text, params string[] keywords)
+        {
+            if (string.IsNullOrWhiteSpace(text) || keywords == null || keywords.Length <= 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < keywords.Length; i++)
+            {
+                string keyword = keywords[i];
+                if (ContainsKeyword(text, keyword))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void AddPoseClassificationItem(
+            Dictionary<string, List<PoseClassificationItem>> categories,
+            string category,
+            string nameAnimation,
+            int modeInt)
+        {
+            if (categories == null || string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(nameAnimation))
+            {
+                return;
+            }
+
+            if (!categories.TryGetValue(category, out var list))
+            {
+                list = new List<PoseClassificationItem>();
+                categories[category] = list;
+            }
+
+            bool exists = list.Any(x =>
+                x != null &&
+                x.ModeInt == modeInt &&
+                string.Equals(x.NameAnimation, nameAnimation, StringComparison.Ordinal));
+            if (exists)
+            {
+                return;
+            }
+
+            list.Add(new PoseClassificationItem
+            {
+                NameAnimation = nameAnimation,
+                ModeInt = modeInt
+            });
+        }
+
+        private static void SavePoseClassification(string path, Dictionary<string, List<PoseClassificationItem>> categories)
+        {
+            var root = new PoseClassificationFile
+            {
+                Categories = categories ?? new Dictionary<string, List<PoseClassificationItem>>(StringComparer.Ordinal)
+            };
+
+            var serializer = new DataContractJsonSerializer(
+                typeof(PoseClassificationFile),
+                new DataContractJsonSerializerSettings
+                {
+                    UseSimpleDictionaryFormat = true
+                });
+
+            using (var ms = new MemoryStream())
+            {
+                serializer.WriteObject(ms, root);
+                string json = Encoding.UTF8.GetString(ms.ToArray());
+                File.WriteAllText(path, json, Utf8NoBom);
+            }
+        }
+
         private void LoadPoseCategoryEntries()
         {
             _poseEntriesByCategory.Clear();
@@ -4859,57 +5194,9 @@ namespace MainGameVoiceFaceEventBridge
         private static void CreateListAnimationFileNamePostfix(HSceneProc __instance)
         {
             CurrentProc = __instance;
-            DumpPoseList(__instance);
-        }
-
-        private static readonly string[] PoseModeNames =
-        {
-            "aibu", "houshi", "sonyu", "masturbation",
-            "peeping", "lesbian", "houshi3P", "sonyu3P", "houshi3PMMF", "sonyu3PMMF"
-        };
-
-        private static void DumpPoseList(HSceneProc proc)
-        {
-            try
+            if (Instance != null)
             {
-                var lists = LstUseAnimInfoField?.GetValue(proc) as List<HSceneProc.AnimationListInfo>[];
-                if (lists == null)
-                {
-                    LogWarn("[pose-dump] lstUseAnimInfo is null");
-                    return;
-                }
-
-                var sb = new StringBuilder();
-                sb.AppendLine("[");
-                bool first = true;
-
-                for (int i = 0; i < lists.Length; i++)
-                {
-                    var list = lists[i];
-                    if (list == null) continue;
-                    string modeName = i < PoseModeNames.Length ? PoseModeNames[i] : i.ToString();
-
-                    for (int j = 0; j < list.Count; j++)
-                    {
-                        var info = list[j];
-                        if (info == null) continue;
-                        if (!first) sb.AppendLine(",");
-                        first = false;
-                        string name = (info.nameAnimation ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
-                        sb.Append($"  {{\"id\":{info.id},\"mode\":\"{modeName}\",\"modeInt\":{i},\"nameAnimation\":\"{name}\"}}");
-                    }
-                }
-
-                sb.AppendLine();
-                sb.AppendLine("]");
-
-                string path = Path.Combine(PluginDir, "pose_list.json");
-                File.WriteAllText(path, sb.ToString(), Utf8NoBom);
-                Log($"[pose-dump] wrote {lists.Sum(l => l?.Count ?? 0)} entries → {path}");
-            }
-            catch (Exception ex)
-            {
-                LogWarn("[pose-dump] failed: " + ex.Message);
+                Instance.EnsurePoseClassificationFilesFromProc(__instance);
             }
         }
 
