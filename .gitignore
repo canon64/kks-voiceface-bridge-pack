@@ -5,3 +5,5 @@
 *.json
 *.md
 *.log
+!README.md
+!README_ja.md
