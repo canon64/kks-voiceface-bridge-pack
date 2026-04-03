@@ -33,6 +33,10 @@
       <HintPath>$(KKSDir)\KoikatsuSunshine_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(KKSDir)\KoikatsuSunshine_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.JSONSerializeModule">
       <HintPath>$(KKSDir)\KoikatsuSunshine_Data\Managed\UnityEngine.JSONSerializeModule.dll</HintPath>
       <Private>False</Private>
