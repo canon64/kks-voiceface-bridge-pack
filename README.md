@@ -72,3 +72,15 @@
 
 - 本セットは「音声連携中心 + 字幕連携同梱」の構成です。
 - 字幕系だけ利用する場合でも、`MainGameSubtitleEventBridge` には `MainGameSubtitleCore` が必要です。
+
+## 今回の更新（2026-04-03）
+
+- `MainGameVoiceFaceEventBridge` に、`response_text` 由来の動画再生トリガーを追加
+  - 「流す」を含む文から動画名トークンを抽出（前後どちらの並びにも対応）
+  - `BlankMapAdd` の `POST /videoroom/play` に `filename` を送信
+  - 選択中フォルダ内の動画ファイル名に部分一致した候補からランダム再生
+- ConfigManager から切り替え可能な `EnableVideoPlaybackByResponseText` を追加（既定 `ON`）
+  - 旧 `config.json` にキーが無い場合は `true` を補完して互換維持
+- 体位分類JSONの自動生成を追加
+  - `pose_sonyu_classified.json` / `pose_houshi_classified.json` が無ければ起動時に生成
+- `pose_list.json` の自動生成を停止（運用対象外）
